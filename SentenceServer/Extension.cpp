@@ -13,7 +13,7 @@
 #define DEFAULT_ADDR htonl(INADDR_LOOPBACK)
 #define DEFAULT_PORT htons(2653)
 
-std::atomic_int sockfd = -1;
+std::atomic<SOCKET> sockfd = -1;
 std::atomic_bool run = true;
 std::mutex m;
 std::wstring cur_sentence = L"";
@@ -42,7 +42,7 @@ int init_sock()
     bind_addr.sin_port = DEFAULT_PORT;
     bind_addr.sin_addr.s_addr = DEFAULT_ADDR;
 
-    if (bind(sockfd, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) == -1) {
+    if (bind(sockfd, reinterpret_cast<sockaddr *>(&bind_addr), sizeof(bind_addr)) == -1) {
         return 1;
     }
 
@@ -67,13 +67,13 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
     switch (ul_reason_for_call) {
         case DLL_PROCESS_ATTACH:
             if (init_sock() != 0) {
-                MessageBoxW(NULL, L"Failed to init socket", L"SentenceServer", MB_OK);
+                MessageBoxW(NULL, L"Failed to init socket", L"SentenceServer", MB_OK | MB_ICONERROR);
                 return FALSE;
             }
 
             accept_thread = std::thread([]() {
                 while (run) {
-                    int clientfd = accept(sockfd, NULL, NULL);
+                    SOCKET clientfd = accept(sockfd, NULL, NULL);
                     if (clientfd == -1) {
                         //throw std::runtime_error("error accepting client");
                         continue;
@@ -83,9 +83,9 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
                     {
                         std::lock_guard<std::mutex> lock(m);
 
-                        int size_needed = WideCharToMultiByte(CP_UTF8, 0, cur_sentence.c_str(), (int)cur_sentence.size(), NULL, 0, NULL, NULL);
-                        std::string sentence_utf8(size_needed, (char)0);
-                        WideCharToMultiByte(CP_UTF8, 0, cur_sentence.c_str(), (int)cur_sentence.size(), &sentence_utf8[0], size_needed, NULL, NULL);
+                        int size_needed = WideCharToMultiByte(CP_UTF8, 0, cur_sentence.c_str(), static_cast<int>(cur_sentence.size()), NULL, 0, NULL, NULL);
+                        std::string sentence_utf8(size_needed, '\0');
+                        WideCharToMultiByte(CP_UTF8, 0, cur_sentence.c_str(), static_cast<int>(cur_sentence.size()), &sentence_utf8[0], size_needed, NULL, NULL);
 
                         resp = "HTTP/1.1 200 OK\r\n"
                                "Content-Type: text/plain;charset=utf-8\r\n"
@@ -94,9 +94,11 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
                                + sentence_utf8;
                     }
 
-                    if (send(clientfd, resp.c_str(), resp.size(), 0) < 0) {
+                    if (send(clientfd, resp.c_str(), static_cast<int>(resp.size()), 0) < 0) {
                         MessageBoxW(NULL, L"Failed to send http response", L"SentenceServer", MB_OK | MB_ICONERROR);
                         closesocket(clientfd);
+
+                        continue;
                     }
 
                     shutdown(clientfd, SD_SEND);
