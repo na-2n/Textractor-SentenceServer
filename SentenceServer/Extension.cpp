@@ -67,13 +67,13 @@ int close_sock()
 template <typename F>
 HANDLE SpawnThread(const F &f)
 {
-    F* copy = new F(f);
+    F *copy = new F(f);
     return CreateThread(nullptr, 0, [](void *copy)
-	{
-		(*(F *)copy)();
-		delete (F *)copy;
-		return 0UL;
-	}, copy, 0, nullptr);
+    {
+        (*(F *)copy)();
+        delete (F *)copy;
+        return 0UL;
+    }, copy, 0, nullptr);
 }
 
 /*
@@ -81,10 +81,10 @@ template<typename F>
 HANDLE SpawnThread(const F& f)
 {
     return CreateThread(nullptr, 0, [](void *func)
-	{
-		(*(F *)func)();
-		return 0UL;
-	}, (F *)& f, 0, nullptr);
+    {
+        (*(F *)func)();
+        return 0UL;
+    }, (F *)& f, 0, nullptr);
 }
 */
 
