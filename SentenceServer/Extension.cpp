@@ -17,7 +17,7 @@ std::atomic<SOCKET> sockfd = -1;
 std::atomic_bool run = true;
 std::mutex m;
 std::wstring cur_sentence = L"";
-std::thread accept_thread;
+HANDLE accept_thread_handle;
 
 int init_sock()
 {
@@ -42,7 +42,7 @@ int init_sock()
     bind_addr.sin_port = DEFAULT_PORT;
     bind_addr.sin_addr.s_addr = DEFAULT_ADDR;
 
-    if (bind(sockfd, reinterpret_cast<sockaddr *>(&bind_addr), sizeof(bind_addr)) == -1) {
+    if (::bind(sockfd, reinterpret_cast<sockaddr *>(&bind_addr), sizeof(bind_addr)) == -1) {
         return 1;
     }
 
@@ -62,6 +62,32 @@ int close_sock()
     return 0;
 }
 
+// taken from Textractor include/common.h
+//  I'm questioning whether we really need to make a copy of the passed function though
+template <typename F>
+HANDLE SpawnThread(const F &f)
+{
+    F* copy = new F(f);
+    return CreateThread(nullptr, 0, [](void *copy)
+	{
+		(*(F *)copy)();
+		delete (F *)copy;
+		return 0UL;
+	}, copy, 0, nullptr);
+}
+
+/*
+template<typename F>
+HANDLE SpawnThread(const F& f)
+{
+    return CreateThread(nullptr, 0, [](void *func)
+	{
+		(*(F *)func)();
+		return 0UL;
+	}, (F *)& f, 0, nullptr);
+}
+*/
+
 BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     switch (ul_reason_for_call) {
@@ -71,7 +97,7 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
                 return FALSE;
             }
 
-            accept_thread = std::thread([]() {
+            accept_thread_handle = SpawnThread([]() {
                 while (run) {
                     SOCKET clientfd = accept(sockfd, NULL, NULL);
                     if (clientfd == -1) {
@@ -114,7 +140,7 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved
 
         case DLL_PROCESS_DETACH:
             run = false;
-            accept_thread.join();
+            CloseHandle(accept_thread_handle);
             close_sock();
 
             break;
