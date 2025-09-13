@@ -1,11 +1,12 @@
 #include "Extension.h"
 
-#include <thread>
 #include <mutex>
 #include <atomic>
-#include <stdexcept>
+#include <string>
+#include <fstream>
 
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <stringapiset.h>
 
 #pragma comment(lib, "Ws2_32.lib") 
@@ -18,6 +19,38 @@ std::atomic_bool run = true;
 std::mutex m;
 std::wstring cur_sentence = L"";
 HANDLE accept_thread_handle;
+struct sockaddr_in bind_addr;
+
+void read_conf()
+{
+    bind_addr.sin_family = AF_INET;
+
+    std::ifstream f("senserv.txt", std::ios::binary);
+    if (!f) {
+        bind_addr.sin_addr.s_addr = DEFAULT_ADDR;
+        bind_addr.sin_port = DEFAULT_PORT;
+
+        return;
+    }
+
+    int i = 0;
+    for (std::string line; std::getline(f, line, ':');) {
+        switch (i) {
+            case 0:
+                inet_pton(AF_INET, line.c_str(), &(bind_addr.sin_addr));
+                break;
+
+            case 1:
+                bind_addr.sin_port = htons(atoi(line.c_str()));
+                break;
+        }
+
+        i++;
+    }
+
+    if (i == 0) bind_addr.sin_addr.s_addr = DEFAULT_ADDR;
+    if (i <= 1) bind_addr.sin_port = DEFAULT_PORT;
+}
 
 int init_sock()
 {
@@ -36,11 +69,6 @@ int init_sock()
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) == -1) {
         return 1;
     }
-
-    struct sockaddr_in bind_addr;
-    bind_addr.sin_family = AF_INET;
-    bind_addr.sin_port = DEFAULT_PORT;
-    bind_addr.sin_addr.s_addr = DEFAULT_ADDR;
 
     if (::bind(sockfd, reinterpret_cast<sockaddr *>(&bind_addr), sizeof(bind_addr)) == -1) {
         return 1;
@@ -63,7 +91,6 @@ int close_sock()
 }
 
 // taken from Textractor include/common.h
-//  I'm questioning whether we really need to make a copy of the passed function though
 template <typename F>
 HANDLE SpawnThread(const F &f)
 {
@@ -76,22 +103,16 @@ HANDLE SpawnThread(const F &f)
     }, copy, 0, nullptr);
 }
 
-/*
-template<typename F>
-HANDLE SpawnThread(const F& f)
-{
-    return CreateThread(nullptr, 0, [](void *func)
-    {
-        (*(F *)func)();
-        return 0UL;
-    }, (F *)& f, 0, nullptr);
-}
-*/
-
 BOOL WINAPI DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
     switch (ul_reason_for_call) {
         case DLL_PROCESS_ATTACH:
+            read_conf();
+
+#ifdef _DEBUG
+            MessageBoxW(NULL, (L"Running on port: " + std::to_wstring(ntohs(bind_addr.sin_port))).c_str(), L"SentenceServer", MB_OK | MB_ICONINFORMATION);
+#endif
+
             if (init_sock() != 0) {
                 MessageBoxW(NULL, L"Failed to init socket", L"SentenceServer", MB_OK | MB_ICONERROR);
                 return FALSE;
